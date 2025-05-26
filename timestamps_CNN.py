@@ -15,6 +15,7 @@ from keras import __version__
 tf_keras.__version__ = __version__
 
 import matplotlib.pyplot as plt
+from matplotlib import pyplot
 
 #This is for saving the model (There were issues with __version__ when calling the function save_model)
 import tensorflow.python.keras as tf_keras
@@ -54,7 +55,7 @@ columns_to_read = ['LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)',
                    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)']
 
 # Load Typical Data
-data = pd.read_excel('randomized_data_healthy.xlsx', usecols=columns_to_read)
+data = pd.read_excel('Normal/randomized_data_healthy.xlsx', usecols=columns_to_read)
 data.fillna(0, inplace=True)
 
 # Define Sampling Frequency
@@ -127,12 +128,12 @@ X_test_input, Y_test_output = X_test[:, :, :6], X_test[:, :, :6]
 # ==============================================
 def build_cnn():
     model = Sequential([
-        Conv1D(64, kernel_size=5, activation='relu', padding='same', input_shape=(51, 6)),
+        Conv1D(64, kernel_size=3, activation='relu', padding='same', input_shape=(51, 6)),
         MaxPooling1D(pool_size=2),
-        Conv1D(32, kernel_size=3, activation='relu', padding='same'),
+        Conv1D(64, kernel_size=3, activation='relu', padding='same'),
         Flatten(),
-        Dense(128, activation='relu'),
-        Dropout(0.3),
+        Dense(64, activation='relu'),  # bottleneck
+        Dense(64, activation='relu'),
         Dense(51 * 6, activation='linear'),
         Reshape((51, 6))
     ])
@@ -201,41 +202,6 @@ next_steps_prediction_df = next_steps_prediction_df[column_names]
 next_steps_prediction_cp_df = next_steps_prediction_cp_df[column_names]
 
 
-# ====================================================
-# Plot for Data (Typical_Data  ||  CP_Data)
-# ====================================================
-def plot_comparison(predicted, actual):
-    """Plots actual vs predicted joint angles."""
-    time = np.arange(actual.shape[0])  # Time index for the dataset
-
-    labels_left = ['LHipAngles', 'LKneeAngles', 'LAnkleAngles']
-    labels_right = ['RHipAngles', 'RKneeAngles', 'RAnkleAngles']
-
-    fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
-
-    # Left Leg Joint Angles (Columns 0,1,2)
-    for i in range(len(labels_left)):
-        axes[i].plot(time, actual[:, i], label=f"Actual {labels_left[i]}", color='blue')
-        axes[i].plot(time, predicted[:, i], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
-        axes[i].set_ylabel("Angle")
-        axes[i].legend()
-        axes[i].set_title(f"Comparison: {labels_left[i]}")
-
-    # Right Leg Joint Angles (Columns 3,4,5)
-    for i in range(len(labels_right)):
-        axes[i + 3].plot(time, actual[:, i + 3], label=f"Actual {labels_right[i]}", color='blue')
-        axes[i + 3].plot(time, predicted[:, i + 3], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
-        axes[i + 3].set_ylabel("Angle")
-        axes[i + 3].legend()
-        axes[i + 3].set_title(f"Comparison: {labels_right[i]}")
-        
-    axes[-1].set_xlabel("Time (Phase Progression)")
-
-    plt.tight_layout()
-    plt.show()
-
-plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
-plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
 
 # ==========================
 # Save Predictions
@@ -247,3 +213,114 @@ predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=column_names
 predicted_df_cp.to_excel("Predictions/timestamps_cp_cnn.xlsx", index=False)
 
 print("Prediction complete. Data saved")
+
+
+# ====================================================
+# Plot for Data (Typical_Data  ||  CP_Data)
+# ====================================================
+# def plot_comparison(predicted, actual):
+#     """Plots actual vs predicted joint angles."""
+#     time = np.arange(actual.shape[0])  # Time index for the dataset
+
+#     labels_left = ['LHipAngles', 'LKneeAngles', 'LAnkleAngles']
+#     labels_right = ['RHipAngles', 'RKneeAngles', 'RAnkleAngles']
+
+#     fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
+
+#     # Left Leg Joint Angles (Columns 0,1,2)
+#     for i in range(len(labels_left)):
+#         axes[i].plot(time, actual[:, i], label=f"Actual {labels_left[i]}", color='blue')
+#         axes[i].plot(time, predicted[:, i], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
+#         axes[i].set_ylabel("Angle")
+#         axes[i].legend()
+#         axes[i].set_title(f"Comparison: {labels_left[i]}")
+
+#     # Right Leg Joint Angles (Columns 3,4,5)
+#     for i in range(len(labels_right)):
+#         axes[i + 3].plot(time, actual[:, i + 3], label=f"Actual {labels_right[i]}", color='blue')
+#         axes[i + 3].plot(time, predicted[:, i + 3], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
+#         axes[i + 3].set_ylabel("Angle")
+#         axes[i + 3].legend()
+#         axes[i + 3].set_title(f"Comparison: {labels_right[i]}")
+        
+#     axes[-1].set_xlabel("Time (Phase Progression)")
+
+#     plt.tight_layout()
+#     plt.show()
+
+# plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
+# plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
+
+def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typical"):
+    """
+    Plots actual knee angles for multiple strides and overlays multiple predicted strides.
+    
+    Parameters:
+    - actual_data: shape (N, 8)
+    - predicted_steps_list: list of predicted arrays (each of shape (51, 8))
+    """
+    stride_length = 51
+    time = np.arange(stride_length)
+
+    # Define color map for predictions
+    colors = pyplot.get_cmap('tab10', len(predicted_steps_list))
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    axs[0].set_title(f"{label} - Left Ankle Angles")
+    axs[1].set_title(f"{label} - Right Ankle Angles")
+
+    # Plot actual left and right knee angles for each stride
+    num_actual_strides = len(actual_data) // stride_length
+    for i in range(num_actual_strides):
+        start = i * stride_length
+        end = start + stride_length
+        axs[0].plot(time, actual_data[start:end, 4], color='lightgray', alpha=0.5)
+        axs[1].plot(time, actual_data[start:end, 5], color='lightgray', alpha=0.5)
+
+    # Plot each predicted stride
+    # for idx, pred in enumerate(predicted_steps_list):
+    #     axs[0].plot(time, pred[:, 2], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+    #     axs[1].plot(time, pred[:, 3], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+
+    axs[0].set_xlabel("Timestep")
+    axs[0].set_ylabel("Left Ankle Angle")
+    axs[0].legend()
+
+    axs[1].set_xlabel("Timestep")
+    axs[1].set_ylabel("Right Ankle Angle")
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+actual_next_20_steps = data.iloc[len(data) - 1020:, :].values
+actual_next_20_steps_cp = data_cerebral_palsy.iloc[len(data_cerebral_palsy) - 1020:, :].values
+
+predicted_strides = []
+current_input = last_known_step.reshape(1, 51, 6)
+
+for _ in range(5):
+    pred = model.predict(current_input)
+    predicted_strides.append(scaler.inverse_transform(pred[0]))
+    current_input = pred  # Use last prediction as next input
+
+predicted_strides_cp = []
+last_known_step_cp = last_known_step_cp.reshape(1, 51, 6)
+
+for _ in range(5):
+    pred = model.predict(last_known_step_cp)
+    predicted_strides_cp.append(scaler.inverse_transform(pred[0]))
+    last_known_step_cp = pred  # Use last prediction as next input
+
+plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides, label="Typical")
+plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides_cp, label="CP")
+
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title("Combined Loss over Epochs")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid(True)
+plt.show()

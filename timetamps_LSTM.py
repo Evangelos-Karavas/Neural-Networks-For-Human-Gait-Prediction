@@ -15,10 +15,9 @@ from tensorflow.python.keras.layers.recurrent import LSTM
 from tensorflow.python.keras.metrics import RootMeanSquaredError
 from tensorflow.python.keras.optimizer_v2 import adam
 import tensorflow.python.keras as tf_keras
-from keras import __version__
-tf_keras.__version__ = __version__
 
 import matplotlib.pyplot as plt
+from matplotlib import pyplot
 
 #This is for saving the model (There were issues with __version__ when calling the function save_model)
 import tensorflow.python.keras as tf_keras
@@ -28,7 +27,7 @@ tf_keras.__version__ = __version__
 # ================================
 # Load Typical Data
 # ================================
-data_typical = "randomized_data_healthy.xlsx"
+data_typical = "Normal/randomized_data_healthy.xlsx"
 columns_to_read = ['LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)',
                    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)']
 data = pd.read_excel(data_typical, usecols=columns_to_read)
@@ -104,11 +103,11 @@ X_train = data_lstm_typical[split_idx_typical:]  # Train only on typical data (e
 X_val = np.vstack((data_lstm_typical[:split_idx_typical], data_lstm_cp[:split_idx_cp]))  # Validation mix of typical & CP
 X_test = data_lstm_cp  # Test only on CP data
 
-print("num_samples_typical:", num_samples_typical)
-print("num_samples_cp:", num_samples_cp)
-print("split_idx_typical:", split_idx_typical)
-print("split_idx_cp:", split_idx_cp)
-print("X_val shape after split:", X_val.shape)
+# print("num_samples_typical:", num_samples_typical)
+# print("num_samples_cp:", num_samples_cp)
+# print("split_idx_typical:", split_idx_typical)
+# print("split_idx_cp:", split_idx_cp)
+# print("X_val shape after split:", X_val.shape)
 
 # ==============================================
 # Separate Inputs (X) and Outputs (Y) (Both 6 Features)
@@ -130,17 +129,15 @@ model = Sequential([
 model.compile(optimizer=adam.Adam(learning_rate=0.003), loss='mse', metrics=['accuracy', 'mae', RootMeanSquaredError()])
 
 # Train Model
-history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=102, validation_data=(X_val_input, Y_val_output))
+history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=204, validation_data=(X_val_input, Y_val_output))
 
 # ==============================================
 # Evaluate Model
 # ==============================================
 def evaluate_model(model, X, Y, label):
-    loss, accuracy, mae = model.evaluate(X, Y, verbose=1)
-    rmse = np.sqrt(loss)  # Compute RMSE from MSE loss
-    
+    loss, accuracy, mae, rmse = model.evaluate(X, Y, verbose=1)
     print(f"🔹 {label} Evaluation:")
-    print(f"Loss (MSE): {loss:.4f}, RMSE: {rmse:.4f}, Accuracy: {accuracy:.4f}, MAE: {mae:.4f}")
+    print(f"Loss (MSE): {loss:.4f}, Accuracy: {accuracy:.4f}, MAE: {mae:.4f}, RMSE: {rmse:.4f}")
     print("="*90)
 
 # Run evaluations with RMSE
@@ -218,6 +215,18 @@ for col in columns_to_read:
             next_steps_prediction_cp_df[col].values[i-1] = mean_value
 
 
+# ==========================
+# Save Predictions
+# ==========================
+predicted_df = pd.DataFrame(next_steps_prediction_df, columns=['LHipAngles', 'RHipAngles', 'LKneeAngles',
+                                                            'RKneeAngles', 'LAnkleAngles', 'RAnkleAngles'])
+predicted_df.to_excel("Predictions/timestamps_typical_lstm.xlsx", index=False)
+
+predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=['LHipAngles', 'RHipAngles', 'LKneeAngles',
+                                                            'RKneeAngles', 'LAnkleAngles', 'RAnkleAngles'])
+predicted_df_cp.to_excel("Predictions/timestamps_cp_lstm.xlsx", index=False)
+print("Prediction complete. Data saved")
+
 # ====================================================
 # Plot for Data (Typical_Data  ||  CP_Data)
 # ====================================================
@@ -256,14 +265,69 @@ actual_next_4_steps_cp = scaler.inverse_transform(actual_next_4_steps_cp)
 plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
 plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
 
-# ==========================
-# Save Predictions
-# ==========================
-predicted_df = pd.DataFrame(next_steps_prediction_df, columns=['LHipAngles', 'RHipAngles', 'LKneeAngles',
-                                                            'RKneeAngles', 'LAnkleAngles', 'RAnkleAngles'])
-predicted_df.to_excel("Predictions/timestamps_typical_lstm.xlsx", index=False)
 
-predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=['LHipAngles', 'RHipAngles', 'LKneeAngles',
-                                                            'RKneeAngles', 'LAnkleAngles', 'RAnkleAngles'])
-predicted_df_cp.to_excel("Predictions/timestamps_cp_lstm.xlsx", index=False)
-print("Prediction complete. Data saved")
+
+def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typical"):
+    """
+    Plots actual knee angles for multiple strides and overlays multiple predicted strides.
+    
+    Parameters:
+    - actual_data: shape (N, 8)
+    - predicted_steps_list: list of predicted arrays (each of shape (51, 8))
+    """
+    stride_length = 51
+    time = np.arange(stride_length)
+
+    # Define color map for predictions
+    colors = pyplot.get_cmap('tab10', len(predicted_steps_list))
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    axs[0].set_title(f"{label} - Left Knee Angles")
+    axs[1].set_title(f"{label} - Right Knee Angles")
+
+    # Plot actual left and right knee angles for each stride
+    num_actual_strides = len(actual_data) // stride_length
+    for i in range(num_actual_strides):
+        start = i * stride_length
+        end = start + stride_length
+        axs[0].plot(time, actual_data[start:end, 2], color='lightgray', alpha=0.5)
+        axs[1].plot(time, actual_data[start:end, 3], color='lightgray', alpha=0.5)
+
+    # Plot each predicted stride
+    for idx, pred in enumerate(predicted_steps_list):
+        axs[0].plot(time, pred[:, 2], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+        axs[1].plot(time, pred[:, 3], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+
+    axs[0].set_xlabel("Timestep")
+    axs[0].set_ylabel("Left Knee Angle")
+    axs[0].legend()
+
+    axs[1].set_xlabel("Timestep")
+    axs[1].set_ylabel("Right Knee Angle")
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+actual_next_20_steps = data.iloc[len(data) - 1020:, :].values
+actual_next_20_steps_cp = data_cerebral_palsy.iloc[len(data_cerebral_palsy) - 1020:, :].values
+
+predicted_strides = []
+current_input = last_known_step.reshape(1, 51, 6)
+
+for _ in range(5):
+    pred = model.predict(current_input)
+    predicted_strides.append(scaler.inverse_transform(pred[0]))
+    current_input = pred  # Use last prediction as next input
+
+predicted_strides_cp = []
+last_known_step_cp = last_known_step_cp.reshape(1, 51, 6)
+
+for _ in range(5):
+    pred = model.predict(last_known_step_cp)
+    predicted_strides_cp.append(scaler.inverse_transform(pred[0]))
+    last_known_step_cp = pred  # Use last prediction as next input
+
+plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides, label="Typical")
+plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides_cp, label="Typical")

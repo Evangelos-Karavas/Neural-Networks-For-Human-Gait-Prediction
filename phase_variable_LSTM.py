@@ -11,6 +11,7 @@ from tensorflow.python.keras.metrics import RootMeanSquaredError
 from tensorflow.python.keras.optimizer_v2 import adam
 
 import matplotlib.pyplot as plt
+from matplotlib import pyplot
 
 #This is for saving the model (There were issues with __version__ when calling the function save_model)
 import tensorflow.python.keras as tf_keras
@@ -170,7 +171,7 @@ columns_to_read = ['LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)', 'Lef
                    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)', 'Right Foot Off']
 
 # Load Typical Data
-data = pd.read_excel('randomized_data_healthy.xlsx', usecols=columns_to_read)
+data = pd.read_excel('Normal/randomized_data_healthy.xlsx', usecols=columns_to_read)
 data.fillna(0, inplace=True)
 
 # Define Sampling Frequency
@@ -252,7 +253,7 @@ model = Sequential([
 model.compile(optimizer=adam.Adam(learning_rate=0.003), loss='mse', metrics=['accuracy', 'mae', RootMeanSquaredError()])
 
 # Train Model
-history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=102, validation_data=(X_val_input, Y_val_output))
+history = model.fit(X_train_input, Y_train_output, epochs=15, batch_size=102, validation_data=(X_val_input, Y_val_output))
 
 # ==============================================
 # Evaluate Model
@@ -311,6 +312,16 @@ next_steps_prediction_cp_df['PhaseVariable_Left'], next_steps_prediction_cp_df['
 next_steps_prediction_df = next_steps_prediction_df[column_names]
 next_steps_prediction_cp_df = next_steps_prediction_cp_df[column_names]
 
+
+# ==========================
+# Save Predictions
+# ==========================
+predicted_df = pd.DataFrame(next_steps_prediction_df, columns=column_names)
+predicted_df.to_excel("Predictions/PV_typical_lstm.xlsx", index=False)
+
+predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=column_names)
+predicted_df_cp.to_excel("Predictions/PV_cp_lstm.xlsx", index=False)
+print("Prediction complete. Data saved")
 
 # ====================================================
 # Plot for Data (Typical_Data  ||  CP_Data)
@@ -391,12 +402,55 @@ def plot_comparison(predicted, actual):
 plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
 plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
 
-# ==========================
-# Save Predictions
-# ==========================
-predicted_df = pd.DataFrame(next_steps_prediction_df, columns=column_names)
-predicted_df.to_excel("Predictions/PV_typical_lstm.xlsx", index=False)
+def plot_knee_overlay(actual_data, predicted_data, label="Typical"):
+    """
+    Plots overlaid knee angles (left and right) for each actual stride and overlays the predicted stride.
+    Assumes each stride is 51 rows.
+    """
+    stride_len = 51
+    time = np.arange(stride_len)  # x-axis: 0 to 50
+    num_strides = actual_data.shape[0] // stride_len
 
-predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=column_names)
-predicted_df_cp.to_excel("Predictions/PV_cp_lstm.xlsx", index=False)
-print("Prediction complete. Data saved")
+    fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+
+    # LEFT KNEE (column 3)
+    for i in range(num_strides):
+        start = i * stride_len
+        end = start + stride_len
+        axs[0].plot(time, actual_data[start:end, 3], color='skyblue', alpha=0.5, linewidth=1)
+    
+    axs[0].plot(time, predicted_data[-stride_len:, 3], color='red', linewidth=2, label="Predicted")
+    axs[0].set_title(f"{label} - Left Knee Overlaid")
+    axs[0].set_ylabel("Angle (deg)")
+    axs[0].legend()
+
+    # RIGHT KNEE (column 6)
+    for i in range(num_strides):
+        start = i * stride_len
+        end = start + stride_len
+        axs[1].plot(time, actual_data[start:end, 6], color='lightgreen', alpha=0.5, linewidth=1)
+    
+    axs[1].plot(time, predicted_data[-stride_len:, 6], color='red', linewidth=2, label="Predicted")
+    axs[1].set_title(f"{label} - Right Knee Overlaid")
+    axs[1].set_xlabel("Step")
+    axs[1].set_ylabel("Angle (deg)")
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+actual_next_20_steps = processed_data.iloc[len(processed_data) - 1020:, :].values
+actual_next_20_steps_cp = processed_cp_data.iloc[len(processed_cp_data) - 1020:, :].values
+
+plot_knee_overlay(actual_next_20_steps, next_steps_prediction_df.values, label="Typical")
+plot_knee_overlay(actual_next_20_steps_cp, next_steps_prediction_cp_df.values, label="CP")
+
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title("Combined Loss over Epochs")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid(True)
+plt.show()
