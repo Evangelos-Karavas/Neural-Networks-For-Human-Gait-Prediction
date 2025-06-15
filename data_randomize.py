@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 # Set the folder path
-folder_path = "Normal"
+folder_path = "Data_Normal"
 
 # Define columns to read
 columns_to_read = ['LHipAngles (1)', 'RHipAngles (1)', 'LKneeAngles (1)', 'RKneeAngles (1)', 

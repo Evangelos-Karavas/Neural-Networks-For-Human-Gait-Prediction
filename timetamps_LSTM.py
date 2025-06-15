@@ -27,7 +27,7 @@ tf_keras.__version__ = __version__
 # ================================
 # Load Typical Data
 # ================================
-data_typical = "Normal/randomized_data_healthy.xlsx"
+data_typical = "Data_Normal/randomized_data_healthy.xlsx"
 columns_to_read = ['LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)',
                    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)']
 data = pd.read_excel(data_typical, usecols=columns_to_read)
@@ -51,7 +51,7 @@ if not data.empty:
                     data.loc[data.index[0], col] = mean_value
 data.fillna(0, inplace=True)  # Fill any missing values with 0
 
-folder_path = 'Data/'
+folder_path = 'Data_CP/'
 file_counter = 0
 data_cerebral_palsy = pd.DataFrame()
 for file_name in os.listdir(folder_path):
@@ -80,8 +80,8 @@ if not data_cerebral_palsy.empty:
                     mean_value = (last_value + first_value) / 2
                     data_cerebral_palsy.loc[data_cerebral_palsy.index[-1], col] = mean_value
                     data_cerebral_palsy.loc[data_cerebral_palsy.index[0], col] = mean_value
-
 data_cerebral_palsy.fillna(0, inplace=True)  # Fill any missing values with 0
+
 # Properly Scale the data to input in Neural Network
 scaler = StandardScaler()
 data_scaled = scaler.fit_transform(data)
@@ -103,12 +103,6 @@ X_train = data_lstm_typical[split_idx_typical:]  # Train only on typical data (e
 X_val = np.vstack((data_lstm_typical[:split_idx_typical], data_lstm_cp[:split_idx_cp]))  # Validation mix of typical & CP
 X_test = data_lstm_cp  # Test only on CP data
 
-# print("num_samples_typical:", num_samples_typical)
-# print("num_samples_cp:", num_samples_cp)
-# print("split_idx_typical:", split_idx_typical)
-# print("split_idx_cp:", split_idx_cp)
-# print("X_val shape after split:", X_val.shape)
-
 # ==============================================
 # Separate Inputs (X) and Outputs (Y) (Both 6 Features)
 # ==============================================
@@ -120,16 +114,16 @@ X_test_input, Y_test_output = X_test[:, :, :6], X_test[:, :, :6]
 # Build LSTM Model
 # ==============================================
 model = Sequential([
-    LSTM(100, activation='tanh', return_sequences=True, input_shape=(51, 6)),
-    LSTM(100, activation='tanh', return_sequences=True, input_shape=(51, 6)),
+    LSTM(100, activation='tanh', return_sequences=True, input_shape=(10, 6)),
+    LSTM(100, activation='tanh', return_sequences=True),
     #LSTM(64, activation='tanh', return_sequences=True, input_shape=(51, 6)),  # Activation: tanh, sigmoid, relu
-    Dropout(0.4),
+    Dropout(0.2),
     Dense(6, activation='linear')])
 
 model.compile(optimizer=adam.Adam(learning_rate=0.003), loss='mse', metrics=['accuracy', 'mae', RootMeanSquaredError()])
 
 # Train Model
-history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=204, validation_data=(X_val_input, Y_val_output))
+history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=102, validation_data=(X_val_input, Y_val_output))
 
 # ==============================================
 # Evaluate Model
@@ -218,12 +212,10 @@ for col in columns_to_read:
 # ==========================
 # Save Predictions
 # ==========================
-predicted_df = pd.DataFrame(next_steps_prediction_df, columns=['LHipAngles', 'RHipAngles', 'LKneeAngles',
-                                                            'RKneeAngles', 'LAnkleAngles', 'RAnkleAngles'])
+predicted_df = pd.DataFrame(next_steps_prediction_df)
 predicted_df.to_excel("Predictions/timestamps_typical_lstm.xlsx", index=False)
 
-predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=['LHipAngles', 'RHipAngles', 'LKneeAngles',
-                                                            'RKneeAngles', 'LAnkleAngles', 'RAnkleAngles'])
+predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df)
 predicted_df_cp.to_excel("Predictions/timestamps_cp_lstm.xlsx", index=False)
 print("Prediction complete. Data saved")
 
@@ -310,6 +302,48 @@ def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typ
     plt.show()
 
 
+    """
+    Plots actual knee angles for multiple strides and overlays multiple predicted strides.
+    
+    Parameters:
+    - actual_data: shape (N, 8)
+    - predicted_steps_list: list of predicted arrays (each of shape (51, 8))
+    """
+    stride_length = 51
+    time = np.arange(stride_length)
+
+    # Define color map for predictions
+    colors = pyplot.get_cmap('tab10', len(predicted_steps_list))
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    axs[0].set_title(f"{label} - Left Ankle Angles")
+    axs[1].set_title(f"{label} - Right Ankle Angles")
+
+    # Plot actual left and right knee angles for each stride
+    num_actual_strides = len(actual_data) // stride_length
+    for i in range(num_actual_strides):
+        start = i * stride_length
+        end = start + stride_length
+        axs[0].plot(time, actual_data[start:end, 4], color='lightgray', alpha=0.5)
+        axs[1].plot(time, actual_data[start:end, 5], color='lightgray', alpha=0.5)
+
+    # Plot each predicted stride
+    for idx, pred in enumerate(predicted_steps_list):
+        axs[0].plot(time, pred[:, 4], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+        axs[1].plot(time, pred[:, 5], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+
+    axs[0].set_xlabel("Timestep")
+    axs[0].set_ylabel("Left Ankle Angle")
+    axs[0].legend()
+
+    axs[1].set_xlabel("Timestep")
+    axs[1].set_ylabel("Right Ankle Angle")
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
 actual_next_20_steps = data.iloc[len(data) - 1020:, :].values
 actual_next_20_steps_cp = data_cerebral_palsy.iloc[len(data_cerebral_palsy) - 1020:, :].values
 
@@ -330,4 +364,13 @@ for _ in range(5):
     last_known_step_cp = pred  # Use last prediction as next input
 
 plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides, label="Typical")
-plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides_cp, label="Typical")
+plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides_cp, label="CP")
+
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title("Combined Loss over Epochs")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid(True)
+plt.show()

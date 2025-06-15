@@ -55,7 +55,7 @@ columns_to_read = ['LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)',
                    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)']
 
 # Load Typical Data
-data = pd.read_excel('Normal/randomized_data_healthy.xlsx', usecols=columns_to_read)
+data = pd.read_excel('Data_Normal/randomized_data_healthy.xlsx', usecols=columns_to_read)
 data.fillna(0, inplace=True)
 
 # Define Sampling Frequency
@@ -65,12 +65,12 @@ fs = 1000  # Adjust if needed (depends on dataset)
 for col in columns_to_read:
     data[col] = butterworth_filter(data[col].values, cutoff=250, fs=fs, order=2, filter_type='low')
     data[col] = butterworth_filter(data[col].values, cutoff=15, fs=fs, order=2, filter_type='high')
-    data[col] = savitzky_golay_filter(data[col].values)
+    #data[col] = savitzky_golay_filter(data[col].values)
 
 # ==============================================
 # Load and Process Cerebral Palsy Data
 # ==============================================
-folder_path = "Data/"
+folder_path = "Data_CP/"
 all_cp_data = []
 cp_data_counter = 0
 for file_name in os.listdir(folder_path):
@@ -218,38 +218,38 @@ print("Prediction complete. Data saved")
 # ====================================================
 # Plot for Data (Typical_Data  ||  CP_Data)
 # ====================================================
-# def plot_comparison(predicted, actual):
-#     """Plots actual vs predicted joint angles."""
-#     time = np.arange(actual.shape[0])  # Time index for the dataset
+def plot_comparison(predicted, actual):
+    """Plots actual vs predicted joint angles."""
+    time = np.arange(actual.shape[0])  # Time index for the dataset
 
-#     labels_left = ['LHipAngles', 'LKneeAngles', 'LAnkleAngles']
-#     labels_right = ['RHipAngles', 'RKneeAngles', 'RAnkleAngles']
+    labels_left = ['LHipAngles', 'LKneeAngles', 'LAnkleAngles']
+    labels_right = ['RHipAngles', 'RKneeAngles', 'RAnkleAngles']
 
-#     fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
+    fig, axes = plt.subplots(6, 1, figsize=(12, 16), sharex=True)
 
-#     # Left Leg Joint Angles (Columns 0,1,2)
-#     for i in range(len(labels_left)):
-#         axes[i].plot(time, actual[:, i], label=f"Actual {labels_left[i]}", color='blue')
-#         axes[i].plot(time, predicted[:, i], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
-#         axes[i].set_ylabel("Angle")
-#         axes[i].legend()
-#         axes[i].set_title(f"Comparison: {labels_left[i]}")
+    # Left Leg Joint Angles (Columns 0,1,2)
+    for i in range(len(labels_left)):
+        axes[i].plot(time, actual[:, i], label=f"Actual {labels_left[i]}", color='blue')
+        axes[i].plot(time, predicted[:, i], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
+        axes[i].set_ylabel("Angle")
+        axes[i].legend()
+        axes[i].set_title(f"Comparison: {labels_left[i]}")
 
-#     # Right Leg Joint Angles (Columns 3,4,5)
-#     for i in range(len(labels_right)):
-#         axes[i + 3].plot(time, actual[:, i + 3], label=f"Actual {labels_right[i]}", color='blue')
-#         axes[i + 3].plot(time, predicted[:, i + 3], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
-#         axes[i + 3].set_ylabel("Angle")
-#         axes[i + 3].legend()
-#         axes[i + 3].set_title(f"Comparison: {labels_right[i]}")
+    # Right Leg Joint Angles (Columns 3,4,5)
+    for i in range(len(labels_right)):
+        axes[i + 3].plot(time, actual[:, i + 3], label=f"Actual {labels_right[i]}", color='blue')
+        axes[i + 3].plot(time, predicted[:, i + 3], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
+        axes[i + 3].set_ylabel("Angle")
+        axes[i + 3].legend()
+        axes[i + 3].set_title(f"Comparison: {labels_right[i]}")
         
-#     axes[-1].set_xlabel("Time (Phase Progression)")
+    axes[-1].set_xlabel("Time (Phase Progression)")
 
-#     plt.tight_layout()
-#     plt.show()
+    plt.tight_layout()
+    plt.show()
 
-# plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
-# plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
+plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
+plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
 
 def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typical"):
     """
@@ -274,13 +274,13 @@ def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typ
     for i in range(num_actual_strides):
         start = i * stride_length
         end = start + stride_length
-        axs[0].plot(time, actual_data[start:end, 4], color='lightgray', alpha=0.5)
-        axs[1].plot(time, actual_data[start:end, 5], color='lightgray', alpha=0.5)
+        axs[0].plot(time, actual_data[start:end, 2], color='lightgray', alpha=0.5)
+        axs[1].plot(time, actual_data[start:end, 3], color='lightgray', alpha=0.5)
 
     # Plot each predicted stride
-    # for idx, pred in enumerate(predicted_steps_list):
-    #     axs[0].plot(time, pred[:, 2], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
-    #     axs[1].plot(time, pred[:, 3], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+    for idx, pred in enumerate(predicted_steps_list):
+        axs[0].plot(time, pred[:, 2], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+        axs[1].plot(time, pred[:, 3], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
 
     axs[0].set_xlabel("Timestep")
     axs[0].set_ylabel("Left Ankle Angle")
