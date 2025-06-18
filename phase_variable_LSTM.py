@@ -9,14 +9,44 @@ from tensorflow.python.keras.layers import Dense, Dropout
 from tensorflow.python.keras.layers.recurrent import LSTM
 from tensorflow.python.keras.metrics import RootMeanSquaredError
 from tensorflow.python.keras.optimizer_v2 import adam
-
 import matplotlib.pyplot as plt
 from matplotlib import pyplot
-
+import tensorflow as tf
 #This is for saving the model (There were issues with __version__ when calling the function save_model)
 import tensorflow.python.keras as tf_keras
 from keras import __version__
 tf_keras.__version__ = __version__
+
+
+def combined_loss(y_true, y_pred):
+    # Mean Squared Error
+    mse = tf.reduce_mean(tf.square(y_true - y_pred))
+
+    # If output is 2D (no sequence), skip temporal terms
+    if len(y_pred.shape) < 3:
+        return mse
+
+    # Smoothness Penalty (encourages temporal consistency)
+    smoothness = tf.reduce_mean(tf.square(y_pred[:, 1:, :] - y_pred[:, :-1, :]))
+
+    # Swing-phase Mutual Exclusion Penalty
+    phase_left = y_pred[:, :, 0]   # PhaseVariable_Left
+    phase_right = y_pred[:, :, 1]  # PhaseVariable_Right
+
+    # Boolean masks: 1 if in swing phase (> 0.5), else 0
+    left_swing = tf.cast(phase_left > 0.5, tf.float32)
+    right_swing = tf.cast(phase_right > 0.5, tf.float32)
+
+    # Penalize overlap (both in swing at the same time)
+    simultaneous_swing = tf.reduce_mean(left_swing * right_swing)
+
+    # Combine all terms with respective weights
+    total_loss = (
+        mse +
+        0.01 * smoothness +
+        1.0 * simultaneous_swing  # Adjust weight (e.g., 0.5 if too aggressive)
+    )
+    return total_loss
 
 # =============================================
 # Compute the Phase Variable for Processed Data
@@ -164,6 +194,8 @@ def savitzky_golay_filter(data, window_size=7, poly_order=3):
     """
     return savgol_filter(data, window_length=window_size, polyorder=poly_order)
 
+
+
 # ==============================================
 # Load and Process Typical Data
 # ==============================================
@@ -258,16 +290,16 @@ X_test_input, Y_test_output = X_test[:, :, :8], X_test[:, :, :8]
 # Build LSTM Model
 # ====================================================
 model = Sequential([
-    LSTM(100, activation='tanh', return_sequences=True, input_shape=(10, 8)),
+    LSTM(100, activation='tanh', return_sequences=True, input_shape=(51, 8)),
     LSTM(100, activation='tanh', return_sequences=True),
     #LSTM(64, activation='tanh', return_sequences=True, input_shape=(51, 6)),  # Activation: tanh, sigmoid, relu
     Dropout(0.2),
     Dense(8, activation='linear')])
 
-model.compile(optimizer=adam.Adam(learning_rate=0.003), loss='mse', metrics=['accuracy', 'mae', RootMeanSquaredError()])
+model.compile(optimizer=adam.Adam(learning_rate=0.003), loss=combined_loss, metrics=['accuracy', 'mae', RootMeanSquaredError()])
 
 # Train Model
-history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=20, validation_data=(X_val_input, Y_val_output))
+history = model.fit(X_train_input, Y_train_output, epochs=150, batch_size=102, validation_data=(X_val_input, Y_val_output))
 
 # ==============================================
 # Evaluate Model
