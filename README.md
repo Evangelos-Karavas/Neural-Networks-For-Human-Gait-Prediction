@@ -1,9 +1,12 @@
 # Neural Network Models for Lower Limb GAIT Prediction
 ## 1. GAIT Analysis and Prediction
 Most of these codes were used for my Master Thesis at NTUA - Mechanical Engineering. Please read the corresponding parts (chapter 3, 4) of my thesis to understand the use of the Phase Variable and all the preprocessing of the Data.
+
 [Thesis - Use of Neural Networks in the Analysis and Prediction of Human GAIT](USE THESIS URL!!!!)
 
-All the data used in this thesis were a contribution from the Hellenic Society for the Protection and Rehabilitation of Disabled People [ELEPAP](https://elepap.gr/) 
+All the data used in this thesis were a contribution from the Hellenic Society for the Protection and Rehabilitation of Disabled People 
+    
+[ELEPAP](https://elepap.gr/) 
 
 ## 2. The Folders of this Project contain
 
