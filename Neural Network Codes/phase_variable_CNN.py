@@ -106,7 +106,7 @@ def compute_phase_variable_prediction(df, thigh_col_left, thigh_col_right):
         foot_contact_percent_left = 66.19
         stance_rows_left = int(51 * (foot_contact_percent_left / 100))  
         foot_contact_binary_left[i:i + stance_rows_left] = 1  
-        foot_contact_percent_right = 65.03
+        foot_contact_percent_right = 66.03
         stance_rows_right = int(51 * (foot_contact_percent_right / 100))  
         foot_contact_binary_right[i:i + stance_rows_right] = 1  
     for i in range(len(df)):
@@ -314,17 +314,26 @@ model.save("Saved_Models/PV_cnn_model.keras", include_optimizer=True)
 # Predict Next 4 Steps
 # ==============================================
 def predict_next_steps(model, last_51_rows, num_steps=8):
-    """Predicts the next N steps using the trained CNN model."""
-    predicted_steps = []
-    current_input = last_51_rows.reshape(1, 51, 8)  # Ensure shape is correct
+    """
+    Predicts the next N timesteps by feeding in 51-timestep input windows and getting 1 timestep output at a time.
+    Assumes model outputs shape (1, 8).
+    """
+    predicted_sequence = []
+    current_window = last_51_rows.copy()  # shape (51, 8)
 
-    for _ in range(num_steps):  
-        predicted_step = model.predict(current_input)  # Predict full 8 features
-        predicted_steps.append(predicted_step.reshape(51, 8))  
-        current_input = predicted_step.reshape(1, 51, 8)  # Use predicted values as new input
+    for _ in range(num_steps * 1):  # Change this if you want more or fewer steps
+        input_batch = current_window.reshape(1, 51, 8)  # shape (1, 51, 8)
+        predicted_step = model.predict(input_batch, verbose=0)  # shape (1, 8)
 
-    predicted_steps = np.vstack(predicted_steps)  # Stack predictions into a sequence
-    return scaler.inverse_transform(predicted_steps)  # Convert back to original scale
+        next_step = predicted_step[0]  # shape (8,)
+        predicted_sequence.append(next_step)
+
+        # Update input window by sliding and appending the new prediction
+        current_window = np.vstack([current_window[1:], next_step])
+
+    predicted_sequence = np.array(predicted_sequence)  # shape (num_steps, 8)
+    return scaler.inverse_transform(predicted_sequence)
+
 
 # Get last known step for prediction
 last_known_step = X_train_input[-1]
