@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 
 from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape
+from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape, GlobalMaxPooling1D
 from tensorflow.python.keras.optimizer_v2 import adam
 from tensorflow.python.keras.regularizers import l2
 
@@ -39,10 +39,10 @@ def compute_phase_variable(df, thigh_col_left, thigh_col_right, foot_contact_col
         
         foot_contact_percent_right = df[foot_contact_col_right].iloc[i]  
         stance_rows_right = int(51 * (foot_contact_percent_right / 100))  
-        foot_contact_binary_right[i:i + stance_rows_right] = 0
+        foot_contact_binary_right[i:i + stance_rows_right] = 1  
 
     stride_count_left = 0
-    stride_count_right = 1
+    stride_count_right = 0
 
     for i in range(len(df)):
         if foot_contact_binary_left[i] == 1 and foot_contact_binary_right[i] == 0:  # Stance phase (left) and swing phase (right)
@@ -63,8 +63,16 @@ def compute_phase_variable(df, thigh_col_left, thigh_col_right, foot_contact_col
             s_left[i] = stride_count_left + ((theta_touchdown_left - df[thigh_col_left].iloc[i]) / (theta_touchdown_left - theta_min_left)) * c
             s_right[i] = stride_count_right + ((theta_touchdown_right - df[thigh_col_right].iloc[i]) / (theta_touchdown_right - theta_min_right)) * c
         elif foot_contact_binary_left[i] == 0 and foot_contact_binary_right[i] == 0:  # Both legs in swing phase
-            s_left[i] = 2
-            s_right[i] = 2
+            theta_m_left = df[thigh_col_left].min()
+            if i > 0:
+                s_left[i] = max(s_left[i-1], stride_count_left + 1 + ((1 - (s_left[i-1] % 1)) / (theta_touchdown_left - theta_m_left)) * (df[thigh_col_left].iloc[i] - theta_touchdown_left))
+            else:
+                s_left[i] = stride_count_left + 1 + ((1 - (s_left[i-1] % 1)) / (theta_touchdown_left - theta_m_left)) * (df[thigh_col_left].iloc[i] - theta_touchdown_left)
+            theta_m_right = df[thigh_col_right].min()
+            if i > 0:
+                s_right[i] = max(s_right[i-1], stride_count_right + 1 + ((1 - (s_right[i-1] % 1)) / (theta_touchdown_right - theta_m_right)) * (df[thigh_col_right].iloc[i] - theta_touchdown_right))
+            else:
+                s_right[i] = stride_count_right + 1 + ((1 - (s_right[i-1] % 1)) / (theta_touchdown_right - theta_m_right)) * (df[thigh_col_right].iloc[i] - theta_touchdown_right)
         if s_left[i] <= s_left[i-1] - 0.5:
             s_left[i] = s_left[i-1]
         if s_right[i] <= s_right[i-1] - 0.5:
@@ -78,6 +86,7 @@ def compute_phase_variable(df, thigh_col_left, thigh_col_right, foot_contact_col
                 stride_count_right += 1
     
     return s_left, s_right
+
 # =============================================
 # Compute the Phase Variable for Predicted Data
 # =============================================
@@ -97,7 +106,7 @@ def compute_phase_variable_prediction(df, thigh_col_left, thigh_col_right):
         foot_contact_percent_left = 66.19
         stance_rows_left = int(51 * (foot_contact_percent_left / 100))  
         foot_contact_binary_left[i:i + stance_rows_left] = 1  
-        foot_contact_percent_right = 64.03
+        foot_contact_percent_right = 65.03
         stance_rows_right = int(51 * (foot_contact_percent_right / 100))  
         foot_contact_binary_right[i:i + stance_rows_right] = 1  
     for i in range(len(df)):
@@ -233,22 +242,45 @@ X_val = np.vstack((data_lstm_typical[450:500], data_lstm_cp[450:500]))
 X_train_input, Y_train_output = X_train[:, :, :8], X_train[:, :, :8]  
 X_val_input, Y_val_output = X_val[:, :, :8], X_val[:, :, :8]  
 X_test_input, Y_test_output = X_test[:, :, :8], X_test[:, :, :8]  
+Y_train_output = Y_train_output[:, -1, :]
+Y_val_output = Y_val_output[:, -1, :]
+Y_test_output = Y_test_output[:, -1, :]
+def thresholded_accuracy(y_true, y_pred, threshold=0.2):
+    """
+    Computes thresholded accuracy: the percentage of predicted values within a specified degree threshold.
+    """
+    error = np.abs(y_true - y_pred)
+    within_threshold = np.mean(error <= threshold)
+    return within_threshold * 100
 
 # ==============================================
 # Build CNN Model
 # ==============================================
 def build_cnn():
     model = Sequential([
-        Conv1D(64, kernel_size=5, activation='relu', padding='same', input_shape=(51, 8)),
-        MaxPooling1D(pool_size=2),
-        Conv1D(32, kernel_size=3, activation='relu', padding='same'),
-        Flatten(),
-        Dense(64, activation='relu'),
-        Dropout(0.2),
-        Dense(51 * 8, activation='linear'),
-        Reshape((51, 8))
+        # First convolutional block
+        Conv1D(32, kernel_size=3, activation='relu', padding='same', input_shape=(51, 8)),
+        Conv1D(48, kernel_size=3, activation='relu', padding='same'),
+        MaxPooling1D(pool_size=2, strides=2),
+
+        # Second convolutional block
+        Conv1D(256, kernel_size=3, activation='relu', padding='same'),
+        Conv1D(256, kernel_size=3, activation='relu', padding='same'),
+        MaxPooling1D(pool_size=2, strides=2),
+
+        # Reduce time steps
+        GlobalMaxPooling1D(),
+
+        # Output layer for 1 time step with 8 features
+        Dense(8, activation='linear'),
     ])
-    model.compile(optimizer=adam.Adam(learning_rate=0.001), loss='mse', metrics=['mae', 'Accuracy'])
+    
+    model.compile(
+        optimizer=adam.Adam(learning_rate=0.001),
+        loss='mse',
+        metrics=['mae', 'Accuracy']
+    )
+    
     return model
 model = build_cnn()
 
@@ -260,16 +292,21 @@ history = model.fit(X_train_input, Y_train_output,epochs=200, batch_size=102,val
 # ==============================================
 # Evaluate Model
 # ==============================================
-def evaluate_model(model, X, Y, label):
-    
+def evaluate_model(model, X, Y, label, threshold=0.2):
     loss, mae, accuracy = model.evaluate(X, Y, verbose=1)
-    print(f"🔹 {label} Evaluation:")
-    print(f"Loss MAE: {loss:.4f}, MSE: {mae:.4f}, Accuracy: {accuracy:.4f}")
-    print("="*90)
+    Y_pred = model.predict(X)
 
-evaluate_model(model, X_train_input, Y_train_output, "Training Data")
-evaluate_model(model, X_val_input, Y_val_output, "Validation Data")
-evaluate_model(model, X_test_input, Y_test_output, "Testing Data")
+    thresh_acc = thresholded_accuracy(Y, Y_pred, threshold=threshold)
+
+    print(f"🔹 {label} Evaluation:")
+    print(f"CNN Loss (MSE): {loss:.4f}, MAE: {mae:.4f}, Accuracy (Keras): {accuracy:.4f}")
+    print(f"CNN Thresholded Accuracy (±{threshold}°): {thresh_acc:.2f}%")
+    print("=" * 90)
+
+evaluate_model(model, X_train_input, Y_train_output, "Training Data", threshold=0.2)
+evaluate_model(model, X_val_input, Y_val_output, "Validation Data", threshold=0.2)
+evaluate_model(model, X_test_input, Y_test_output, "Testing Data", threshold=0.2)
+
 
 model.save("Saved_Models/PV_cnn_model.keras", include_optimizer=True)
 
@@ -324,86 +361,123 @@ predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=column_names
 predicted_df_cp.to_excel("Predictions/PV_cp_cnn.xlsx", index=False)
 print("Prediction complete. Data saved")
 
-# ====================================================
-# Plot for Data (Typical_Data  ||  CP_Data)
-# ====================================================
-def plot_comparison(predicted, actual):
-    """Plots actual vs predicted joint angles and marks swing phase when the predicted phase variable changes sharply."""
-    time = np.arange(actual.shape[0])  # Time index for the dataset
 
-    labels_left = ['LHipAngles', 'LKneeAngles', 'LAnkleAngles']
-    labels_right = ['RHipAngles', 'RKneeAngles', 'RAnkleAngles']
 
-    fig, axes = plt.subplots(8, 1, figsize=(12, 16), sharex=True)
+# ==============================================================================
+# All Plots for Phase Variable || Predicted Angles || Loss - Accuracy of Model
+# ==============================================================================
 
-    # Compute the change in predicted phase variables over time
-    delta_pred_left = np.abs(np.diff(predicted[:, 0]))  # Change in predicted left phase variable
-    delta_pred_right = np.abs(np.diff(predicted[:, 1]))  # Change in predicted right phase variable
 
-    # Detect swing phase start indices where |predicted[t] - predicted[t-1]| > 0.2
-    swing_left = np.where(delta_pred_left > 0.15)[0] + 1  # Offset by +1 due to np.diff
-    swing_right = np.where(delta_pred_right > 0.15)[0] + 1  # Offset by +1 due to np.diff
+# def plot_phase_variables(predicted_df, actual_array, title_suffix="Typical"):
+#     """
+#     Plots predicted and actual phase variables for left and right legs.
+#     """
+#     time = np.arange(predicted_df.shape[0])
 
-    # Function to filter unique swing phase start indices (avoid consecutive detections)
-    def filter_swing_starts(indices):
-        """Filters consecutive indices, keeping only the first occurrence in a swing phase event."""
-        filtered = []
-        for i in range(len(indices)):
-            if i == 0 or (indices[i] - indices[i - 1] > 5):  # Ensures at least 5 time steps apart
-                filtered.append(indices[i])
-        return np.array(filtered)
+#     fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
 
-    # Apply filtering to remove consecutive detections
-    swing_left = filter_swing_starts(swing_left)
-    swing_right = filter_swing_starts(swing_right)
+#     # Plot Phase Variable - Left
+#     # ax[0].plot(time, actual_array[:, 0], label='Actual Left', color='blue')
+#     ax[0].plot(time, predicted_df['PhaseVariable_Left'], label='Predicted Left',  color='blue')
+#     ax[0].set_ylabel("Phase Variable Left")
+#     ax[0].set_ylim(-0.2, 1.2)
+#     ax[0].set_title(f"Phase Variable (Left) - {title_suffix}")
+#     ax[0].legend()
 
-    # Function to add swing phase vertical lines
-    def add_swing_phase_lines(ax):
-        """Adds red vertical lines at swing phase start indices."""
-        for t in np.unique(np.concatenate((swing_left, swing_right))):  # Combine both swing phases
-            ax.axvline(x=t, color='gray', linestyle='dashed', alpha=0.8, label="Swing Phase Start" if t == swing_left[0] else "")
+#     # Plot Phase Variable - Right
+#     # ax[1].plot(time, actual_array[:, 1], label='Actual Right', color='blue')
+#     ax[1].plot(time, predicted_df['PhaseVariable_Left'], label='Predicted Right', color='blue')
+#     ax[1].set_ylabel("Phase Variable Right")
+#     ax[1].set_ylim(-0.2, 1.2)
+#     ax[1].set_xlabel("Time (Samples)")
+#     ax[1].set_title(f"Phase Variable (Right) - {title_suffix}")
+#     ax[1].legend()
 
-    # # Phase Variable Plot (Left)
-    # axes[0].plot(time, actual[:, 0], label="Actual Phase Variable (Left)", color='blue')
-    # axes[0].plot(time, predicted[:, 0], label="Predicted Phase Variable (Left)", linestyle='dashed', color='red')
-    # axes[0].set_ylabel("Phase Variable (Left)")
-    # axes[0].set_ylim([0, 1.2])
-    # add_swing_phase_lines(axes[0])
-    # axes[0].legend()
+#     plt.tight_layout()
+#     plt.show()
 
-    # # Phase Variable Plot (Right)
-    # axes[1].plot(time, actual[:, 1], label="Actual Phase Variable (Right)", color='blue')
-    # axes[1].plot(time, predicted[:, 1], label="Predicted Phase Variable (Right)", linestyle='dashed', color='red')
-    # axes[1].set_ylabel("Phase Variable (Right)")
-    # axes[1].set_ylim([0, 1.2])
-    # add_swing_phase_lines(axes[1])
-    # axes[1].legend()
 
-    # Left Leg Joint Angles (Columns 2,3,4)
-    for i in range(len(labels_left)):
-        axes[i + 2].plot(time, actual[:, i + 2], label=f"Actual {labels_left[i]}", color='blue')
-        axes[i + 2].plot(time, predicted[:, i + 2], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
-        axes[i + 2].set_ylabel("Angle")
-        axes[i + 2].legend()
-        axes[i + 2].set_title(f"Comparison: {labels_left[i]}")
-        add_swing_phase_lines(axes[i + 2])  # Add swing phase lines
+# plot_phase_variables(next_steps_prediction_df, actual_next_4_steps, title_suffix="Typical")
+# plot_phase_variables(next_steps_prediction_cp_df, actual_next_4_steps_cp, title_suffix="CP")
 
-    # Right Leg Joint Angles (Columns 5,6,7)
-    for i in range(len(labels_right)):
-        axes[i + 5].plot(time, actual[:, i + 5], label=f"Actual {labels_right[i]}", color='blue')
-        axes[i + 5].plot(time, predicted[:, i + 5], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
-        axes[i + 5].set_ylabel("Angle")
-        axes[i + 5].legend()
-        axes[i + 5].set_title(f"Comparison: {labels_right[i]}")
-        add_swing_phase_lines(axes[i + 5])  # Add swing phase lines
 
-    axes[-1].set_xlabel("Time (Phase Progression)")
+# def plot_comparison(predicted, actual):
+#     """Plots actual vs predicted joint angles and marks swing phase when the predicted phase variable changes sharply."""
+#     time = np.arange(actual.shape[0])  # Time index for the dataset
 
-    plt.tight_layout()
-    plt.show()
+#     labels_left = ['LHipAngles', 'LKneeAngles', 'LAnkleAngles']
+#     labels_right = ['RHipAngles', 'RKneeAngles', 'RAnkleAngles']
+
+#     fig, axes = plt.subplots(8, 1, figsize=(12, 16), sharex=True)
+
+#     # Compute the change in predicted phase variables over time
+#     delta_pred_left = np.abs(np.diff(predicted[:, 0]))  # Change in predicted left phase variable
+#     delta_pred_right = np.abs(np.diff(predicted[:, 1]))  # Change in predicted right phase variable
+
+#     # Detect swing phase start indices where |predicted[t] - predicted[t-1]| > 0.2
+#     swing_left = np.where(delta_pred_left > 0.15)[0] + 1  # Offset by +1 due to np.diff
+#     swing_right = np.where(delta_pred_right > 0.15)[0] + 1  # Offset by +1 due to np.diff
+
+#     # Function to filter unique swing phase start indices (avoid consecutive detections)
+#     def filter_swing_starts(indices):
+#         """Filters consecutive indices, keeping only the first occurrence in a swing phase event."""
+#         filtered = []
+#         for i in range(len(indices)):
+#             if i == 0 or (indices[i] - indices[i - 1] > 5):  # Ensures at least 5 time steps apart
+#                 filtered.append(indices[i])
+#         return np.array(filtered)
+
+#     # Apply filtering to remove consecutive detections
+#     swing_left = filter_swing_starts(swing_left)
+#     swing_right = filter_swing_starts(swing_right)
+
+#     # Function to add swing phase vertical lines
+#     def add_swing_phase_lines(ax):
+#         """Adds red vertical lines at swing phase start indices."""
+#         for t in np.unique(np.concatenate((swing_left, swing_right))):  # Combine both swing phases
+#             ax.axvline(x=t, color='gray', linestyle='dashed', alpha=0.8, label="Swing Phase Start" if t == swing_left[0] else "")
+
+#     # Phase Variable Plot (Left)
+#     # axes[0].plot(time, actual[:, 0], label="Actual Phase Variable (Left)", color='blue')
+#     axes[0].plot(time, predicted[:, 0], label="Predicted Phase Variable (Left)", color='red')
+#     axes[0].set_ylabel("Phase Variable (Left)")
+#     axes[0].set_ylim([0, 1.2])
+#     add_swing_phase_lines(axes[0])
+#     axes[0].legend()
+
+#     # Phase Variable Plot (Right)
+#     # axes[1].plot(time, actual[:, 1], label="Actual Phase Variable (Right)", color='blue')
+#     axes[1].plot(time, predicted[:, 1], label="Predicted Phase Variable (Right)", color='red')
+#     axes[1].set_ylabel("Phase Variable (Right)")
+#     axes[1].set_ylim([0, 1.2])
+#     add_swing_phase_lines(axes[1])
+#     axes[1].legend()
+
+#     # # Left Leg Joint Angles (Columns 2,3,4)
+#     # for i in range(len(labels_left)):
+#     #     axes[i + 2].plot(time, actual[:, i + 2], label=f"Actual {labels_left[i]}", color='blue')
+#     #     axes[i + 2].plot(time, predicted[:, i + 2], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
+#     #     axes[i + 2].set_ylabel("Angle")
+#     #     axes[i + 2].legend()
+#     #     axes[i + 2].set_title(f"Comparison: {labels_left[i]}")
+#     #     add_swing_phase_lines(axes[i + 2])  # Add swing phase lines
+
+#     # # Right Leg Joint Angles (Columns 5,6,7)
+#     # for i in range(len(labels_right)):
+#     #     axes[i + 5].plot(time, actual[:, i + 5], label=f"Actual {labels_right[i]}", color='blue')
+#     #     axes[i + 5].plot(time, predicted[:, i + 5], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
+#     #     axes[i + 5].set_ylabel("Angle")
+#     #     axes[i + 5].legend()
+#     #     axes[i + 5].set_title(f"Comparison: {labels_right[i]}")
+#     #     add_swing_phase_lines(axes[i + 5])  # Add swing phase lines
+
+#     axes[-1].set_xlabel("Time (Phase Progression)")
+
+#     plt.tight_layout()
+#     plt.show()
     
-plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
-plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
+# plot_comparison(next_steps_prediction_df.values, actual_next_4_steps)
+# plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
 
 
 # def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typical"):
@@ -426,11 +500,11 @@ plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
 
 #     # Plot actual left and right knee angles for each stride
 #     num_actual_strides = len(actual_data) // stride_length
-#     for i in range(num_actual_strides):
-#         start = i * stride_length
+#     for idx in range(num_actual_strides):
+#         start = idx * stride_length
 #         end = start + stride_length
-#         axs[0].plot(time, actual_data[start:end, 3], color='lightgray', alpha=0.5)
-#         axs[1].plot(time, actual_data[start:end, 6], color='lightgray', alpha=0.5)
+#         axs[0].plot(time, actual_data[start:end, 3], color=colors(idx), alpha=0.5)
+#         axs[1].plot(time, actual_data[start:end, 6], color=colors(idx), alpha=0.5)
 
 #     # Plot each predicted stride
 #     for idx, pred in enumerate(predicted_steps_list):
@@ -473,34 +547,109 @@ plot_comparison(next_steps_prediction_cp_df.values, actual_next_4_steps_cp)
 # plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides_cp, label="Typical")
 
 
-def plot_phase_variables(predicted_df, actual_array, title_suffix="Typical"):
-    """
-    Plots predicted and actual phase variables for left and right legs.
-    """
-    time = np.arange(predicted_df.shape[0])
 
-    fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
-
-    # Plot Phase Variable - Left
-    ax[0].plot(time, actual_array[:, 0], label='Actual Left', color='blue')
-    ax[0].plot(time, predicted_df['PhaseVariable_Left'], label='Predicted Left', linestyle='--', color='red')
-    ax[0].set_ylabel("Phase Variable Left")
-    ax[0].set_ylim(0, 1.2)
-    ax[0].set_title(f"Phase Variable (Left) - {title_suffix}")
-    ax[0].legend()
-
-    # Plot Phase Variable - Right
-    ax[1].plot(time, actual_array[:, 1], label='Actual Right', color='blue')
-    ax[1].plot(time, predicted_df['PhaseVariable_Right'], label='Predicted Right', linestyle='--', color='red')
-    ax[1].set_ylabel("Phase Variable Right")
-    ax[1].set_ylim(0, 1.2)
-    ax[1].set_xlabel("Time (Samples)")
-    ax[1].set_title(f"Phase Variable (Right) - {title_suffix}")
-    ax[1].legend()
-
-    plt.tight_layout()
-    plt.show()
+# def plot_multiple_knee_predictions(actual_data, label="Typical"):
+#     """
+#     Plots actual knee angles for multiple strides and overlays multiple predicted strides.
+    
+#     Parameters:
+#     - actual_data: shape (N, 8)
+#     - predicted_steps_list: list of predicted arrays (each of shape (51, 8))
+#     """
+#     stride_length = 51
+#     time = np.arange(stride_length)
 
 
-plot_phase_variables(next_steps_prediction_df, actual_next_4_steps, title_suffix="Typical")
-plot_phase_variables(next_steps_prediction_cp_df, actual_next_4_steps_cp, title_suffix="CP")
+#     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+
+
+#     # Plot actual left and right knee angles for each stride
+#     num_actual_strides = len(actual_data) // stride_length
+#     for idx in range(num_actual_strides):
+#         start = idx * stride_length
+#         end = start + stride_length
+#         axs[0].plot(time, actual_data[start:end, 2], color='red', alpha=0.5)
+#         axs[1].plot(time, actual_data[start:end, 5], color='blue', alpha=0.5)
+
+
+
+#     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+
+
+#     # Plot actual left and right knee angles for each stride
+#     num_actual_strides = len(actual_data) // stride_length
+#     for idx in range(num_actual_strides):
+#         start = idx * stride_length
+#         end = start + stride_length
+#         axs[0].plot(time, actual_data[start:end, 3], color='red', alpha=0.5)
+#         axs[1].plot(time, actual_data[start:end, 6], color='blue', alpha=0.5)
+
+#     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+
+
+#     # Plot actual left and right ankle angles for each stride
+#     num_actual_strides = len(actual_data) // stride_length
+#     for idx in range(num_actual_strides):
+#         start = idx * stride_length
+#         end = start + stride_length
+#         axs[0].plot(time, actual_data[start:end, 4], color='red', alpha=0.5)
+#         axs[1].plot(time, actual_data[start:end, 7], color='blue', alpha=0.5)
+
+#     axs[0].set_xlabel("Timestep")
+#     axs[0].set_ylabel("Left Knee Angle")
+#     axs[0].legend()
+
+#     axs[1].set_xlabel("Timestep")
+#     axs[1].set_ylabel("Right Knee Angle")
+#     axs[1].legend()
+
+#     plt.tight_layout()
+#     plt.show()
+
+
+# actual_next_20_steps = processed_data.iloc[len(processed_data) - 2040:, :].values
+# actual_next_20_steps_cp = processed_cp_data.iloc[len(processed_cp_data) - 2040:, :].values
+
+
+
+# plot_multiple_knee_predictions(actual_next_20_steps, label="Typical")
+# plot_multiple_knee_predictions(actual_next_20_steps_cp, label="CP")
+
+
+# def plot_phase_with_contact(df, title="Phase Variables with Swing/Stance", label_prefix="Typical"):
+#     """
+#     Plots the phase variable with swing and stance phases highlighted.
+#     """
+#     num_samples = 1020
+#     time = np.arange(num_samples)
+
+#     left_phase = df['PhaseVariable_Left'].iloc[-num_samples:].values
+#     right_phase = df['PhaseVariable_Right'].iloc[-num_samples:].values
+#     left_contact = df['Left Foot Off'].iloc[-num_samples:].values
+#     right_contact = df['Right Foot Off'].iloc[-num_samples:].values
+
+#     fig, axes = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+
+#     for ax, phase, contact, side in zip(axes, [left_phase, right_phase], [left_contact, right_contact], ['Left', 'Right']):
+#         ax.plot(time, phase, label=f'{label_prefix} - {side}', color='black')
+#         ax.set_ylabel(f'Phase Variable ({side})')
+#         ax.set_ylim(0, 2.5)
+
+#         # Shade swing (foot off ground) and stance (foot on ground) regions
+#         for i in range(len(contact)):
+#             if contact[i] < 50:  # Consider <50% as swing, >=50% as stance
+#                 ax.axvspan(i, i + 1, color='mistyrose', alpha=0.4)  # Swing
+#             else:
+#                 ax.axvspan(i, i + 1, color='lightblue', alpha=0.3)   # Stance
+
+#         ax.legend(loc="upper right")
+#         ax.grid(True)
+
+#     axes[1].set_xlabel("Time (samples)")
+#     fig.suptitle(title)
+#     plt.tight_layout()
+#     plt.show()
+
+# # Run plotting
+# plot_phase_with_contact(data.iloc[-1020:], title="Typical Phase Variable with Swing/Stance", label_prefix="Typical")
+# plot_phase_with_contact(data_cerebral_palsy.iloc[-1020:], title="CP Phase Variable with Swing/Stance", label_prefix="CP")
