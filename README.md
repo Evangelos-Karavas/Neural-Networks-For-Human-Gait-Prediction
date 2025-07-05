@@ -18,10 +18,12 @@ All the data used in this thesis were a contribution from the Hellenic Society f
 
 * Predictions: Saved predictions in excel files. All Neural Network models save the predictions in the corresponding excel file.
 
-* Saved_Models: Saved Keras models for each neural network to be used by ROS2 control node in another [project](https://github.com/Evangelos-Karavas/Exo-suit-control).
+* Saved_Models: Saved Keras models for each neural network to be used by ROS2 Control node in another [project](https://github.com/Evangelos-Karavas/Exo-suit-control).
 
 * Scaler: Saved Scaler for phase variable and timestamps approach to use later with ROS2 Control node.
 
 
 ## 3. ROS2 Control
 All the Neural Network Models created in this project were used for the joint angle control of a lower-limb exoskeleton. It's a beta simulation for the exoskeleton to be used to children with cerebral palsy.
+
+For more information look at the project [Exo-suit-control ](https://github.com/Evangelos-Karavas/Exo-suit-control)
