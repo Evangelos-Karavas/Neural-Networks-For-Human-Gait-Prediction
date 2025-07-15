@@ -242,9 +242,9 @@ X_val = np.vstack((data_lstm_typical[450:500], data_lstm_cp[450:500]))
 X_train_input, Y_train_output = X_train[:, :, :8], X_train[:, :, :8]  
 X_val_input, Y_val_output = X_val[:, :, :8], X_val[:, :, :8]  
 X_test_input, Y_test_output = X_test[:, :, :8], X_test[:, :, :8]  
-Y_train_output = Y_train_output[:, -1, :]
-Y_val_output = Y_val_output[:, -1, :]
-Y_test_output = Y_test_output[:, -1, :]
+# Y_train_output = Y_train_output[:, -1, :]
+# Y_val_output = Y_val_output[:, -1, :]
+# Y_test_output = Y_test_output[:, -1, :]
 def thresholded_accuracy(y_true, y_pred, threshold=0.2):
     """
     Computes thresholded accuracy: the percentage of predicted values within a specified degree threshold.
@@ -271,8 +271,9 @@ def build_cnn():
         # Reduce time steps
         GlobalMaxPooling1D(),
 
-        # Output layer for 1 time step with 8 features
-        Dense(8, activation='linear'),
+        # Output layer for 51 time steps with 8 features
+        Dense(51 * 8, activation='linear'),
+        Reshape((51, 8)),
     ])
     
     model.compile(
@@ -313,37 +314,25 @@ model.save("Saved_Models/PV_cnn_model.keras", include_optimizer=True)
 # ==============================================
 # Predict Next 4 Steps
 # ==============================================
-def predict_next_steps(model, last_51_rows, num_steps=408):
+def predict_next_steps(model, last_51_rows, num_steps=1):
     """
-    Predicts the next N timesteps by feeding in 51-timestep input windows and getting 1 timestep output at a time.
-    Assumes model outputs shape (1, 8).
+    Predicts the next full stride (51 timesteps × 8 features) from the last 51 rows.
+    Returns: (51, 8)
     """
-    predicted_sequence = []
-    current_window = last_51_rows.copy()  # shape (51, 8)
-
-    for _ in range(num_steps * 1):  # Change this if you want more or fewer steps
-        input_batch = current_window.reshape(1, 51, 8)  # shape (1, 51, 8)
-        predicted_step = model.predict(input_batch, verbose=0)  # shape (1, 8)
-
-        next_step = predicted_step[0]  # shape (8,)
-        predicted_sequence.append(next_step)
-
-        # Update input window by sliding and appending the new prediction
-        current_window = np.vstack([current_window[1:], next_step])
-
-    predicted_sequence = np.array(predicted_sequence)  # shape (num_steps, 8)
-    return scaler.inverse_transform(predicted_sequence)
+    input_data = last_51_rows.reshape(1, 51, 8)
+    predicted_stride = model.predict(input_data, verbose=0)  # shape (1, 51, 8)
+    return scaler.inverse_transform(predicted_stride.reshape(-1, 8))  # shape (51, 8)
 
 
 # Get last known step for prediction
 last_known_step = X_train_input[-1]
 last_known_step_cp = X_test_input[-1] 
-num_steps=408
+num_steps=4
 next_steps_prediction = predict_next_steps(model, last_known_step, num_steps)
 next_steps_prediction_cp = predict_next_steps(model, last_known_step_cp, num_steps)
 # Get actual next 4 steps from dataset for plotting
-actual_next_4_steps = processed_data.iloc[len(processed_data) - 408:, :].values  
-actual_next_4_steps_cp = processed_cp_data.iloc[len(processed_cp_data) - 408:, :].values  
+actual_next_4_steps = processed_data.iloc[len(processed_data) - 51:, :].values  
+actual_next_4_steps_cp = processed_cp_data.iloc[len(processed_cp_data) - 51:, :].values  
 
 # Convert the numpy array to a pandas DataFrame
 column_names = ['PhaseVariable_Left', 'PhaseVariable_Right', 
@@ -385,17 +374,19 @@ def plot_phase_variables(predicted_df, actual_array, title_suffix="Typical"):
 
     fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
 
+    # Convert to NumPy arrays to avoid multi-indexing errors
+    pv_left = predicted_df['PhaseVariable_Left'].to_numpy()
+    pv_right = predicted_df['PhaseVariable_Right'].to_numpy()
+
     # Plot Phase Variable - Left
-    # ax[0].plot(time, actual_array[:, 0], label='Actual Left', color='blue')
-    ax[0].plot(time, predicted_df['PhaseVariable_Left'], label='Predicted Left',  color='blue')
+    ax[0].plot(time, pv_left, label='Predicted Left', color='blue')
     ax[0].set_ylabel("Phase Variable Left")
     ax[0].set_ylim(-0.2, 1.2)
     ax[0].set_title(f"Phase Variable (Left) - {title_suffix}")
     ax[0].legend()
 
     # Plot Phase Variable - Right
-    # ax[1].plot(time, actual_array[:, 1], label='Actual Right', color='blue')
-    ax[1].plot(time, predicted_df['PhaseVariable_Left'], label='Predicted Right', color='blue')
+    ax[1].plot(time, pv_right, label='Predicted Right', color='red')
     ax[1].set_ylabel("Phase Variable Right")
     ax[1].set_ylim(-0.2, 1.2)
     ax[1].set_xlabel("Time (Samples)")
@@ -404,7 +395,6 @@ def plot_phase_variables(predicted_df, actual_array, title_suffix="Typical"):
 
     plt.tight_layout()
     plt.show()
-
 
 plot_phase_variables(next_steps_prediction_df, actual_next_4_steps, title_suffix="Typical")
 plot_phase_variables(next_steps_prediction_cp_df, actual_next_4_steps_cp, title_suffix="CP")
@@ -447,7 +437,7 @@ def plot_comparison(predicted, actual):
             ax.axvline(x=t, color='gray', linestyle='dashed', alpha=0.8, label="Swing Phase Start" if t == swing_left[0] else "")
 
     # Phase Variable Plot (Left)
-    # axes[0].plot(time, actual[:, 0], label="Actual Phase Variable (Left)", color='blue')
+    axes[0].plot(time, actual[:, 0], label="Actual Phase Variable (Left)", color='blue')
     axes[0].plot(time, predicted[:, 0], label="Predicted Phase Variable (Left)", color='red')
     axes[0].set_ylabel("Phase Variable (Left)")
     axes[0].set_ylim([0, 1.2])
@@ -455,30 +445,30 @@ def plot_comparison(predicted, actual):
     axes[0].legend()
 
     # Phase Variable Plot (Right)
-    # axes[1].plot(time, actual[:, 1], label="Actual Phase Variable (Right)", color='blue')
+    axes[1].plot(time, actual[:, 1], label="Actual Phase Variable (Right)", color='blue')
     axes[1].plot(time, predicted[:, 1], label="Predicted Phase Variable (Right)", color='red')
     axes[1].set_ylabel("Phase Variable (Right)")
     axes[1].set_ylim([0, 1.2])
     add_swing_phase_lines(axes[1])
     axes[1].legend()
 
-    # # Left Leg Joint Angles (Columns 2,3,4)
-    # for i in range(len(labels_left)):
-    #     axes[i + 2].plot(time, actual[:, i + 2], label=f"Actual {labels_left[i]}", color='blue')
-    #     axes[i + 2].plot(time, predicted[:, i + 2], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
-    #     axes[i + 2].set_ylabel("Angle")
-    #     axes[i + 2].legend()
-    #     axes[i + 2].set_title(f"Comparison: {labels_left[i]}")
-    #     add_swing_phase_lines(axes[i + 2])  # Add swing phase lines
+    # Left Leg Joint Angles (Columns 2,3,4)
+    for i in range(len(labels_left)):
+        axes[i + 2].plot(time, actual[:, i + 2], label=f"Actual {labels_left[i]}", color='blue')
+        axes[i + 2].plot(time, predicted[:, i + 2], label=f"Predicted {labels_left[i]}", linestyle='dashed', color='red')
+        axes[i + 2].set_ylabel("Angle")
+        axes[i + 2].legend()
+        axes[i + 2].set_title(f"Comparison: {labels_left[i]}")
+        add_swing_phase_lines(axes[i + 2])  # Add swing phase lines
 
-    # # Right Leg Joint Angles (Columns 5,6,7)
-    # for i in range(len(labels_right)):
-    #     axes[i + 5].plot(time, actual[:, i + 5], label=f"Actual {labels_right[i]}", color='blue')
-    #     axes[i + 5].plot(time, predicted[:, i + 5], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
-    #     axes[i + 5].set_ylabel("Angle")
-    #     axes[i + 5].legend()
-    #     axes[i + 5].set_title(f"Comparison: {labels_right[i]}")
-    #     add_swing_phase_lines(axes[i + 5])  # Add swing phase lines
+    # Right Leg Joint Angles (Columns 5,6,7)
+    for i in range(len(labels_right)):
+        axes[i + 5].plot(time, actual[:, i + 5], label=f"Actual {labels_right[i]}", color='blue')
+        axes[i + 5].plot(time, predicted[:, i + 5], label=f"Predicted {labels_right[i]}", linestyle='dashed', color='red')
+        axes[i + 5].set_ylabel("Angle")
+        axes[i + 5].legend()
+        axes[i + 5].set_title(f"Comparison: {labels_right[i]}")
+        add_swing_phase_lines(axes[i + 5])  # Add swing phase lines
 
     axes[-1].set_xlabel("Time (Phase Progression)")
 
