@@ -3,10 +3,8 @@ import pandas as pd
 import numpy as np
 import joblib
 
-from scipy.signal import butter, filtfilt, savgol_filter
 from sklearn.preprocessing import StandardScaler
 
-from tensorflow.python import keras
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, Reshape
 from tensorflow.python.keras.optimizer_v2 import adam
@@ -23,31 +21,6 @@ from keras import __version__
 tf_keras.__version__ = __version__
 
 
-# ==============================================
-#  Butter-worth Filtering - Smoothing
-# ==============================================
-def butterworth_filter(data, cutoff, fs, order, filter_type):
-    """
-    Applies a Butterworth filter (low-pass or high-pass).
-    - cutoff: Cutoff frequency (Hz)
-    - fs: Sampling frequency (Hz)
-    - order: Filter order
-    - filter_type: 'low' for low-pass, 'high' for high-pass
-    """
-    nyquist = 0.5 * fs
-    normal_cutoff = cutoff / nyquist
-    b, a = butter(order, normal_cutoff, btype=filter_type, analog=False)
-    return filtfilt(b, a, data)
-
-def savitzky_golay_filter(data, window_size=7, poly_order=3):
-    """
-    Applies Savitzky-Golay filter for trajectory smoothing.
-    - window_size: Must be an odd number
-    - poly_order: Degree of polynomial to fit
-    """
-    return savgol_filter(data, window_length=window_size, polyorder=poly_order)
-
-
 # ================================
 # Load Typical Data
 # ================================
@@ -58,39 +31,52 @@ columns_to_read = ['LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)',
 data = pd.read_excel('Data_Normal/randomized_data_healthy.xlsx', usecols=columns_to_read)
 data.fillna(0, inplace=True)
 
-# Define Sampling Frequency
-fs = 1000  # Adjust if needed (depends on dataset)
-
-# Apply Filters to Each Column
-for col in columns_to_read:
-    data[col] = butterworth_filter(data[col].values, cutoff=250, fs=fs, order=2, filter_type='low')
-    data[col] = butterworth_filter(data[col].values, cutoff=15, fs=fs, order=2, filter_type='high')
-    #data[col] = savitzky_golay_filter(data[col].values)
 
 # ==============================================
 # Load and Process Cerebral Palsy Data
 # ==============================================
-folder_path = "Data_CP/"
-all_cp_data = []
-cp_data_counter = 0
+folder_path = 'Data_CP/'
+file_counter = 0
+data_cerebral_palsy = pd.DataFrame()
+
 for file_name in os.listdir(folder_path):
     if file_name.endswith('.xlsx'):
+        file_counter += 1
         file_path = os.path.join(folder_path, file_name)
-        df1 = pd.read_excel(file_path, 'Data', usecols=columns_to_read, skiprows=[1, 2])
-        df1.fillna(0, inplace=True)
+        df = pd.read_excel(file_path, 'Data', usecols=columns_to_read, skiprows=[1, 2])
+        df.fillna(0, inplace=True)
 
-        # Apply Filters
-        for col in columns_to_read:
-            df1[col] = butterworth_filter(df1[col].values, cutoff=250, fs=fs, order=2, filter_type='low')
-            df1[col] = butterworth_filter(df1[col].values, cutoff=15, fs=fs, order=2, filter_type='high')
-            df1[col] = savitzky_golay_filter(df1[col].values)
-            if cp_data_counter > 500:
-                break
-            cp_data_counter =+ 1
-        all_cp_data.append(df1)
+    data_cerebral_palsy = pd.concat([data_cerebral_palsy, df], ignore_index=True)
+    if file_counter >= 500:
+        break
 
-# Merge CP Data
-data_cerebral_palsy = pd.concat(all_cp_data, ignore_index=True)
+# ==========================
+# Divergence Fixing
+# ==========================
+if not data_cerebral_palsy.empty:
+    for col in columns_to_read:
+        last_value = data_cerebral_palsy[col].values[-1]
+        first_value = data_cerebral_palsy[col].values[0]
+        divergence = np.abs(last_value - first_value)
+        if divergence > 5:
+            mean_value = (last_value + first_value) / 2
+            data_cerebral_palsy.loc[data_cerebral_palsy.index[-1], col] = mean_value
+            data_cerebral_palsy.loc[data_cerebral_palsy.index[0], col] = mean_value
+        if divergence > 2:
+            mean_value = (last_value + first_value) / 2
+            data_cerebral_palsy.loc[data_cerebral_palsy.index[-1], col] = mean_value
+            data_cerebral_palsy.loc[data_cerebral_palsy.index[0], col] = mean_value
+
+data_cerebral_palsy.fillna(0, inplace=True)
+
+# Wrap-around right leg by 25 steps (cyclic shift)
+delay = 25
+right_leg_columns = [
+    'RHipAngles (1)', 'RKneeAngles (1)', 'RAnkleAngles (1)']
+for col in right_leg_columns:
+    original = data_cerebral_palsy[col].values
+    shifted = np.concatenate([original[-delay:], original[:-delay]])
+    data_cerebral_palsy[col] = shifted
 
 # Properly Scale the data to input in Neural Network
 scaler = StandardScaler()
@@ -126,23 +112,17 @@ X_test_input, Y_test_output = X_test[:, :, :6], X_test[:, :, :6]
 # ==============================================
 # Build CNN Model
 # ==============================================
-def build_cnn():
-    model = Sequential([
-        Conv1D(64, kernel_size=3, activation='relu', padding='same', input_shape=(51, 6)),
-        MaxPooling1D(pool_size=2),
-        Conv1D(64, kernel_size=3, activation='relu', padding='same'),
-        Flatten(),
-        Dense(64, activation='relu'),  # bottleneck
-        Dense(64, activation='relu'),
-        Dense(51 * 6, activation='linear'),
-        Reshape((51, 6))
-    ])
-    
-    model.compile(optimizer=adam.Adam(learning_rate=0.001), loss='mse', metrics=['accuracy', 'mae'])
-    return model
+model = Sequential([
+    Conv1D(64, kernel_size=3, activation='relu', padding='same', input_shape=(51, 6)),
+    MaxPooling1D(pool_size=2),
+    Conv1D(64, kernel_size=3, activation='relu', padding='same'),
+    Flatten(),
+    Dense(64, activation='relu'),  # bottleneck
+    Dense(51 * 6, activation='linear'),
+    Reshape((51, 6))
+])
 
-# Build model
-model = build_cnn()
+model.compile(optimizer=adam.Adam(learning_rate=0.001), loss='mse', metrics=['accuracy', 'mae'])
 
 # Check model summary
 model.summary()
@@ -168,7 +148,7 @@ model.save("Saved_Models/Timestamp_cnn_model.keras", include_optimizer=True)
 # ==============================================
 # Predict Next 4 Steps
 # ==============================================
-def predict_next_steps(model, last_51_rows, num_steps=4):
+def predict_next_steps(model, last_51_rows, num_steps):
     """Predicts the next N steps using the trained CNN model."""
     predicted_steps = []
     current_input = last_51_rows.reshape(1, 51, 6)  # Ensure shape is correct
@@ -188,8 +168,8 @@ num_steps=4
 next_steps_prediction = predict_next_steps(model, last_known_step, num_steps)
 next_steps_prediction_cp = predict_next_steps(model, last_known_step_cp, num_steps=4)
 # Get actual next 4 steps from dataset for plotting
-actual_next_4_steps = data.iloc[len(data) - 204:, :].values  
-actual_next_4_steps_cp = data_cerebral_palsy.iloc[len(data_cerebral_palsy) - 204:, :].values  
+actual_next_4_steps = data.iloc[len(data) - (num_steps * 51):, :].values  
+actual_next_4_steps_cp = data_cerebral_palsy.iloc[len(data_cerebral_palsy) - (num_steps * 51):, :].values  
 
 # Convert the numpy array to a pandas DataFrame
 column_names = ['LHipAngles (1)', 'LKneeAngles (1)', 'LAnkleAngles (1)',
@@ -213,6 +193,7 @@ predicted_df_cp = pd.DataFrame(next_steps_prediction_cp_df, columns=column_names
 predicted_df_cp.to_excel("Predictions/timestamps_cp_cnn.xlsx", index=False)
 
 print("Prediction complete. Data saved")
+
 
 
 # ====================================================
@@ -266,8 +247,8 @@ def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typ
     colors = pyplot.get_cmap('tab10', len(predicted_steps_list))
 
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
-    axs[0].set_title(f"{label} - Left Ankle Angles")
-    axs[1].set_title(f"{label} - Right Ankle Angles")
+    axs[0].set_title(f"{label} - Left Knee Angles")
+    axs[1].set_title(f"{label} - Right Knee Angles")
 
     # Plot actual left and right knee angles for each stride
     num_actual_strides = len(actual_data) // stride_length
@@ -281,6 +262,62 @@ def plot_multiple_knee_predictions(actual_data, predicted_steps_list, label="Typ
     for idx, pred in enumerate(predicted_steps_list):
         axs[0].plot(time, pred[:, 2], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
         axs[1].plot(time, pred[:, 3], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+
+    axs[0].set_xlabel("Timestep")
+    axs[0].set_ylabel("Left Knee Angle")
+    axs[0].legend()
+
+    axs[1].set_xlabel("Timestep")
+    axs[1].set_ylabel("Right Knee Angle")
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    axs[0].set_title(f"{label} - Left Hip Angles")
+    axs[1].set_title(f"{label} - Right Hip Angles")
+
+    # Plot actual left and right knee angles for each stride
+    num_actual_strides = len(actual_data) // stride_length
+    for i in range(num_actual_strides):
+        start = i * stride_length
+        end = start + stride_length
+        axs[0].plot(time, actual_data[start:end, 0], color='lightgray', alpha=0.5)
+        axs[1].plot(time, actual_data[start:end, 1], color='lightgray', alpha=0.5)
+
+    # Plot each predicted stride
+    for idx, pred in enumerate(predicted_steps_list):
+        axs[0].plot(time, pred[:, 0], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+        axs[1].plot(time, pred[:, 1], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+
+    axs[0].set_xlabel("Timestep")
+    axs[0].set_ylabel("Left Hip Angle")
+    axs[0].legend()
+
+    axs[1].set_xlabel("Timestep")
+    axs[1].set_ylabel("Right Hip Angle")
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    axs[0].set_title(f"{label} - Left Ankle Angles")
+    axs[1].set_title(f"{label} - Right Ankle Angles")
+
+    # Plot actual left and right knee angles for each stride
+    num_actual_strides = len(actual_data) // stride_length
+    for i in range(num_actual_strides):
+        start = i * stride_length
+        end = start + stride_length
+        axs[0].plot(time, actual_data[start:end, 4], color='lightgray', alpha=0.5)
+        axs[1].plot(time, actual_data[start:end, 5], color='lightgray', alpha=0.5)
+
+    # Plot each predicted stride
+    for idx, pred in enumerate(predicted_steps_list):
+        axs[0].plot(time, pred[:, 4], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
+        axs[1].plot(time, pred[:, 5], color=colors(idx), label=f"Prediction {idx+1}", linewidth=2)
 
     axs[0].set_xlabel("Timestep")
     axs[0].set_ylabel("Left Ankle Angle")
@@ -316,6 +353,8 @@ for _ in range(5):
 plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides, label="Typical")
 plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides_cp, label="CP")
 
+
+
 plt.plot(history.history['loss'], label='Training Loss')
 plt.plot(history.history['val_loss'], label='Validation Loss')
 plt.title("Combined Loss over Epochs")
@@ -323,4 +362,31 @@ plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.legend()
 plt.grid(True)
+plt.show()
+
+
+# Plot MAE, MSE, and optionally RMSE over epochs
+plt.figure(figsize=(12, 5))
+
+# Plot MAE
+plt.subplot(1, 2, 1)
+plt.plot(history.history['mae'], label='Training MAE')
+plt.plot(history.history['val_mae'], label='Validation MAE')
+plt.title("MAE over Epochs")
+plt.xlabel("Epoch")
+plt.ylabel("Mean Absolute Error")
+plt.legend()
+plt.grid(True)
+
+# Plot MSE (Loss)
+plt.subplot(1, 2, 2)
+plt.plot(history.history['loss'], label='Training MSE')
+plt.plot(history.history['val_loss'], label='Validation MSE')
+plt.title("MSE (Loss) over Epochs")
+plt.xlabel("Epoch")
+plt.ylabel("Mean Squared Error")
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
 plt.show()

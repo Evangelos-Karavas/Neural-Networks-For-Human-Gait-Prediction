@@ -218,7 +218,7 @@ data_scaled = scaler.fit_transform(processed_data)
 data_cp_scaled = scaler.fit_transform(processed_cp_data)
 
 #Save scaler for ROS node
-joblib.dump(scaler, "Scaler/PV_standard_scaler.save")
+joblib.dump(scaler, "Scaler/pv_standard_scaler.save")
 
 # ==========================
 # Reshape Data for CNN
@@ -314,14 +314,14 @@ model.save("Saved_Models/PV_cnn_model.keras", include_optimizer=True)
 # ==============================================
 # Predict Next 4 Steps
 # ==============================================
-def predict_next_steps(model, last_51_rows, num_steps=1):
+def predict_next_steps(model, last_51_rows, num_steps):
     """
-    Predicts the next full stride (51 timesteps × 8 features) from the last 51 rows.
-    Returns: (51, 8)
+    Predicts the next N timesteps by feeding in 51-timestep input windows and getting 1 timestep output at a time.
+    Assumes model outputs shape (1, 8).
     """
-    input_data = last_51_rows.reshape(1, 51, 8)
-    predicted_stride = model.predict(input_data, verbose=0)  # shape (1, 51, 8)
-    return scaler.inverse_transform(predicted_stride.reshape(-1, 8))  # shape (51, 8)
+    input_batch = last_51_rows.reshape(1, 51, 8)
+    predicted_stride = model.predict(input_batch, verbose=0)  # shape (1, 51, 8)
+    return scaler.inverse_transform(predicted_stride.reshape(-1, 8))
 
 
 # Get last known step for prediction
