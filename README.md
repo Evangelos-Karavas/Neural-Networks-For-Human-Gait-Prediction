@@ -14,7 +14,7 @@ All the data used in this thesis were a contribution from the Hellenic Society f
 
 * Data_Normal: Lower-limb kinematic and kinetic data of typically developed children.
 
-* Neural Network Codes: Neural Networks (LSTM, CNN) using the phase variable or timestamps approach.
+* Neural_Network_Codes: Neural Networks (LSTM, CNN) using the phase variable or timestamps approach.
 
 * Predictions: Saved predictions in excel files. All Neural Network models save the predictions in the corresponding excel file.
 
