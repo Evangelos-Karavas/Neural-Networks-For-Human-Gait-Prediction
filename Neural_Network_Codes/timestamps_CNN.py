@@ -20,7 +20,39 @@ import tensorflow.python.keras as tf_keras
 from keras import __version__
 tf_keras.__version__ = __version__
 
-
+# ==============================================================================
+# Create directories used for saving Predictions - Keras Models - and Scaler
+# ==============================================================================
+directory_predictions = "Predictions"
+try:
+    os.mkdir(directory_predictions)
+    print(f"Directory '{directory_predictions}' created successfully.")
+except FileExistsError:
+    print(f"Directory '{directory_predictions}' already exists.")
+except PermissionError:
+    print(f"Permission denied: Unable to create '{directory_predictions}'.")
+except Exception as e:
+    print(f"An error occurred: {e}")
+directory_models = "Saved_Models"
+try:
+    os.mkdir(directory_models)
+    print(f"Directory '{directory_models}' created successfully.")
+except FileExistsError:
+    print(f"Directory '{directory_models}' already exists.")
+except PermissionError:
+    print(f"Permission denied: Unable to create '{directory_models}'.")
+except Exception as e:
+    print(f"An error occurred: {e}")
+directory_scaler = "Scaler"
+try:
+    os.mkdir(directory_scaler)
+    print(f"Directory '{directory_scaler}' created successfully.")
+except FileExistsError:
+    print(f"Directory '{directory_scaler}' already exists.")
+except PermissionError:
+    print(f"Permission denied: Unable to create '{directory_scaler}'.")
+except Exception as e:
+    print(f"An error occurred: {e}")
 # ================================
 # Load Typical Data
 # ================================
@@ -84,7 +116,7 @@ data_scaled = scaler.fit_transform(data)
 data_cp_scaled = scaler.fit_transform(data_cerebral_palsy)
 
 #Save scaler for ROS node
-joblib.dump(scaler, "Scaler/standard_scaler.save")
+joblib.dump(scaler, "Scaler/standard_scaler_cnn.save")
 
 # ==========================
 # Reshape Data for CNN
@@ -181,6 +213,19 @@ next_steps_prediction_cp_df = pd.DataFrame(next_steps_prediction_cp, columns=col
 next_steps_prediction_df = next_steps_prediction_df[column_names]
 next_steps_prediction_cp_df = next_steps_prediction_cp_df[column_names]
 
+for col in columns_to_read:
+    last_value = next_steps_prediction_cp_df[col].values[-1]
+    first_value = next_steps_prediction_cp_df[col].values[0]
+    divergence = np.abs(last_value - first_value)
+    if divergence > 5:
+        mean_value = (last_value + first_value) / 2
+        next_steps_prediction_cp_df.loc[next_steps_prediction_cp_df.index[-1], col] = mean_value
+        next_steps_prediction_cp_df.loc[next_steps_prediction_cp_df.index[0], col] = mean_value
+    for col in columns_to_read:
+        if divergence > 2:
+            mean_value = (last_value + first_value) / 2
+            next_steps_prediction_cp_df.loc[next_steps_prediction_cp_df.index[-1], col] = mean_value
+            next_steps_prediction_cp_df.loc[next_steps_prediction_cp_df.index[0], col] = mean_value
 
 
 # ==========================
@@ -351,42 +396,42 @@ for _ in range(5):
     last_known_step_cp = pred  # Use last prediction as next input
 
 plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides, label="Typical")
-plot_multiple_knee_predictions(actual_next_20_steps, predicted_strides_cp, label="CP")
+plot_multiple_knee_predictions(actual_next_20_steps_cp, predicted_strides_cp, label="CP")
 
 
+# # Plot mixed loss over epochs
+# plt.plot(history.history['loss'], label='Training Loss')
+# plt.plot(history.history['val_loss'], label='Validation Loss')
+# plt.title("Combined Loss over Epochs")
+# plt.xlabel("Epoch")
+# plt.ylabel("Loss")
+# plt.legend()
+# plt.grid(True)
+# plt.show()
 
-plt.plot(history.history['loss'], label='Training Loss')
-plt.plot(history.history['val_loss'], label='Validation Loss')
-plt.title("Combined Loss over Epochs")
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.legend()
-plt.grid(True)
-plt.show()
 
+# # Plot MAE, MSE, and optionally RMSE over epochs
+# plt.figure(figsize=(12, 5))
 
-# Plot MAE, MSE, and optionally RMSE over epochs
-plt.figure(figsize=(12, 5))
+# # Plot MAE
+# plt.subplot(1, 2, 1)
+# plt.plot(history.history['mae'], label='Training MAE')
+# plt.plot(history.history['val_mae'], label='Validation MAE')
+# plt.title("MAE over Epochs")
+# plt.xlabel("Epoch")
+# plt.ylabel("Mean Absolute Error")
+# plt.legend()
+# plt.grid(True)
 
-# Plot MAE
-plt.subplot(1, 2, 1)
-plt.plot(history.history['mae'], label='Training MAE')
-plt.plot(history.history['val_mae'], label='Validation MAE')
-plt.title("MAE over Epochs")
-plt.xlabel("Epoch")
-plt.ylabel("Mean Absolute Error")
-plt.legend()
-plt.grid(True)
+# # Plot MSE (Loss)
+# plt.subplot(1, 2, 2)
+# plt.plot(history.history['loss'], label='Training MSE')
+# plt.plot(history.history['val_loss'], label='Validation MSE')
+# plt.title("MSE (Loss) over Epochs")
+# plt.xlabel("Epoch")
+# plt.ylabel("Mean Squared Error")
+# plt.legend()
+# plt.grid(True)
 
-# Plot MSE (Loss)
-plt.subplot(1, 2, 2)
-plt.plot(history.history['loss'], label='Training MSE')
-plt.plot(history.history['val_loss'], label='Validation MSE')
-plt.title("MSE (Loss) over Epochs")
-plt.xlabel("Epoch")
-plt.ylabel("Mean Squared Error")
-plt.legend()
-plt.grid(True)
-
-plt.tight_layout()
-plt.show()
+# plt.tight_layout()
+# plt.show()

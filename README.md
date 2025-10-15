@@ -1,4 +1,4 @@
-# Neural Network Models for Lower Limb GAIT Prediction
+# Neural Network Models for Human GAIT Prediction
 ## 1. GAIT Analysis and Prediction
 Most of these codes were used for my Master Thesis at NTUA - Mechanical Engineering. Please read the corresponding parts (chapter 3, 4) of my thesis to understand the use of the Phase Variable and all the preprocessing of the Data.
 
@@ -24,6 +24,6 @@ All the data used in this thesis were a contribution from the Hellenic Society f
 
 
 ## 3. ROS2 Control
-All the Neural Network Models created in this project were used for the joint angle control of a lower-limb exoskeleton. It's a beta simulation for the exoskeleton to be used to children with cerebral palsy.
+All the Neural Network Models created in this project were used for the joint angle control of a lower-limb exoskeleton. It's a not finished simulation for an exoskeleton to be used on children with cerebral palsy.
 
-For more information look at the project [Exo-suit-control ](https://github.com/Evangelos-Karavas/Exo-suit-control)
+For more information look at the project [ROS2-Lower-Limb-Exoskeleton-Control ](https://github.com/Evangelos-Karavas/ROS2-Lower-Limb-Exoskeleton-Control)
